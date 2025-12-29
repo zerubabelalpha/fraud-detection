@@ -1,25 +1,41 @@
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 class DataCleaner:
     def __init__(self):
         pass
 
     def load_data(self, filepath):
-        """Loads data from a CSV file."""
-        return pd.read_csv(filepath)
+        """Loads data from a CSV file with error handling."""
+        try:
+            if not os.path.exists(filepath):
+                raise FileNotFoundError(f"File not found: {filepath}")
+            df = pd.read_csv(filepath)
+            logger.info(f"Successfully loaded data from {filepath}")
+            return df
+        except Exception as e:
+            logger.error(f"Error loading data from {filepath}: {e}")
+            raise
 
     def handle_missing_values(self, df):
         """Impute missing values: numeric with median, categorical with 'Unknown'."""
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        if not numeric_cols.empty:
-            df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].median())
-        
-        categorical_cols = df.select_dtypes(include=['object']).columns
-        if not categorical_cols.empty:
-            df[categorical_cols] = df[categorical_cols].fillna('Unknown')
-        return df
+        try:
+            df = df.copy()
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            if not numeric_cols.empty:
+                df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].median())
+            
+            categorical_cols = df.select_dtypes(include=['object']).columns
+            if not categorical_cols.empty:
+                df[categorical_cols] = df[categorical_cols].fillna('Unknown')
+            logger.info("Handled missing values.")
+            return df
+        except Exception as e:
+            logger.error(f"Error handling missing values: {e}")
+            raise
 
     def remove_duplicates(self, df):
         """Removes duplicate rows."""
@@ -40,31 +56,46 @@ class DataCleaner:
         Merges fraud data with country data based on IP range.
         Optimized using pd.merge_asof after sorting.
         """
-        # Ensure IP addresses are integers
-        fraud_df['ip_address'] = fraud_df['ip_address'].astype(int)
-        ip_df['lower_bound_ip_address'] = ip_df['lower_bound_ip_address'].astype(int)
-        ip_df['upper_bound_ip_address'] = ip_df['upper_bound_ip_address'].astype(int)
+        try:
+            required_fraud = ['ip_address']
+            required_ip = ['lower_bound_ip_address', 'upper_bound_ip_address', 'country']
+            
+            for col in required_fraud:
+                if col not in fraud_df.columns:
+                    raise ValueError(f"Fraud data missing required column: {col}")
+            for col in required_ip:
+                if col not in ip_df.columns:
+                    raise ValueError(f"IP data missing required column: {col}")
 
-        # Sort for merge_asof
-        fraud_df = fraud_df.sort_values('ip_address')
-        ip_df = ip_df.sort_values('lower_bound_ip_address')
+            # Ensure IP addresses are integers
+            fraud_df['ip_address'] = fraud_df['ip_address'].astype(int)
+            ip_df['lower_bound_ip_address'] = ip_df['lower_bound_ip_address'].astype(int)
+            ip_df['upper_bound_ip_address'] = ip_df['upper_bound_ip_address'].astype(int)
 
-        # Merge based on lower bound
-        merged_df = pd.merge_asof(
-            fraud_df, 
-            ip_df, 
-            left_on='ip_address', 
-            right_on='lower_bound_ip_address'
-        )
+            # Sort for merge_asof
+            fraud_df = fraud_df.sort_values('ip_address')
+            ip_df = ip_df.sort_values('lower_bound_ip_address')
 
-        # Filter out cases where IP is not within the upper bound
-        mask = (merged_df['ip_address'] >= merged_df['lower_bound_ip_address']) & \
-               (merged_df['ip_address'] <= merged_df['upper_bound_ip_address'])
-        
-        merged_df.loc[~mask, 'country'] = 'Unknown'
-        
-        # Cleanup extra columns from ip_df
-        return merged_df.drop(columns=['lower_bound_ip_address', 'upper_bound_ip_address'])
+            # Merge based on lower bound
+            merged_df = pd.merge_asof(
+                fraud_df, 
+                ip_df, 
+                left_on='ip_address', 
+                right_on='lower_bound_ip_address'
+            )
+
+            # Filter out cases where IP is not within the upper bound
+            mask = (merged_df['ip_address'] >= merged_df['lower_bound_ip_address']) & \
+                   (merged_df['ip_address'] <= merged_df['upper_bound_ip_address'])
+            
+            merged_df.loc[~mask, 'country'] = 'Unknown'
+            
+            logger.info("Successfully merged data with geolocation.")
+            # Cleanup extra columns from ip_df
+            return merged_df.drop(columns=['lower_bound_ip_address', 'upper_bound_ip_address'])
+        except Exception as e:
+            logger.error(f"Error merging with geo: {e}")
+            raise
 
     def engineer_features(self, df):
         """Add time-based features and transaction frequency."""
