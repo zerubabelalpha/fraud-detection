@@ -12,15 +12,33 @@ from sklearn.metrics import (
     average_precision_score
 )
 import lightgbm as lgb
+import joblib
+import os
 
 class ModelTrainer:
     def __init__(self):
         pass
 
+    def _clean_names(self, X):
+        """
+        Cleans feature names to avoid characters that LightGBM and other tools might reject.
+        """
+        X = X.copy()
+        X.columns = [
+            str(col).replace('[', '').replace(']', '')
+            .replace('<', '').replace('>', '')
+            .replace('{', '').replace('}', '')
+            .replace(',', '').replace(':', '')
+            .replace('"', '').replace("'", "")
+            for col in X.columns
+        ]
+        return X
+
     def evaluate_model(self, model, X_test, y_test, model_name="Model"):
         """
         Evaluates the model and prints AUC-PR, F1-Score, and Confusion Matrix.
         """
+        X_test = self._clean_names(X_test)
         y_pred = model.predict(X_test)
         
         # Handle cases where model might not have predict_proba
@@ -45,14 +63,17 @@ class ModelTrainer:
         """
         Trains a Logistic Regression model.
         """
+        X_train = self._clean_names(X_train)
         model = LogisticRegression(max_iter=max_iter, **kwargs)
         model.fit(X_train, y_train)
         return model
 
     def train_lightgbm(self, X_train, y_train, **kwargs):
         """
-        Trains a LightGBM model.
+        Trains a LightGBM model. Cleans feature names to avoid JSON errors.
         """
+        X_train = self._clean_names(X_train)
+        
         params = {
             'learning_rate': 0.05,
             'n_estimators': 200,
@@ -70,6 +91,7 @@ class ModelTrainer:
         """
         Performs Stratified K-Fold cross-validation and reports mean/std.
         """
+        X = self._clean_names(X)
         skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=42)
         scoring = {'f1': 'f1', 'auc_pr': 'average_precision'}
         
@@ -87,3 +109,11 @@ class ModelTrainer:
         """
         df = pd.DataFrame(results)
         return df.sort_values(by="AUC-PR", ascending=False)
+
+    def save_model(self, model, filepath):
+        """
+        Saves the trained model to a specified filepath.
+        """
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        joblib.dump(model, filepath)
+        print(f"Model saved to: {filepath}")
